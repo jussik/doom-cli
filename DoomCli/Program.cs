@@ -1,22 +1,36 @@
 ﻿using System.Text;
-using System.Text.Json;
 using Sharprompt;
 using WindowsShortcutFactory;
 
-var config = File.Exists("doomcli.json")
-    ? JsonSerializer.Deserialize<Config>(File.ReadAllText("doomcli.json")) ?? new()
-    : new Config();
-
-var port = GetSelection("port", config.PortsPath, false, "*.exe");
-var iwad = GetSelection("IWAD", config.IWadsPath, false, "*.wad");
-List<string> pwads = new();
-while(true)
+string shortcutsPath = Environment.ExpandEnvironmentVariables(@"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Doom");
+HashSet<string> knownIwads = new(StringComparer.OrdinalIgnoreCase)
 {
-    var selectedPwad = GetSelection("PWAD", config.PWadsPath, true, "*.wad", "*.pk3");
-    if (selectedPwad == "-")
-        break;
-    pwads.Add(selectedPwad);
-}
+    "DOOM1.WAD",
+    "DOOM.WAD",
+    "DOOM2.WAD",
+    "TNT.WAD",
+    "PLUTONIA.WAD",
+    "HERETIC1.WAD",
+    "HERETIC.WAD",
+    "HEXEN.WAD",
+    "HEXDD.WAD",
+    "STRIFE0.WAD",
+    "STRIFE1.WAD",
+    "VOICES.WAD"
+};
+
+var portOpts = FindFiles("*.exe")
+    .Where(f => !Path.GetFileName(f).Equals(
+        Environment.ProcessPath is { } exePath ? Path.GetFileName(exePath) : "DoomCli.exe",
+        StringComparison.OrdinalIgnoreCase));
+var port = GetSelectionSingle("port", portOpts);
+
+var wadsByType = FindFiles("*.wad")
+    .ToLookup(f => knownIwads.Contains(Path.GetFileName(f)));
+// true = IWAD, false = PWAD
+string iwad = GetSelectionSingle("IWAD", wadsByType[true]);
+IReadOnlyList<string> pwads = GetSelectionMultiple("PWADs",
+    wadsByType[false].Concat(FindFiles("*.pk3")));
 
 var name = Prompt.Input<string>("Shortcut name?", pwads.Count > 0
     ? string.Join(" ", pwads.Select(wad => Path.GetFileName(Path.GetDirectoryName(wad))).Distinct())
@@ -37,48 +51,46 @@ if (pwads.Count > 0)
     }
 }
 var arguments = argsBuilder.ToString();
-var shortcutPath = Path.Combine(Environment.CurrentDirectory, config.ShortcutsPath, name + ".lnk");
+var shortcutPath = Path.Combine(Environment.CurrentDirectory, shortcutsPath, name + ".lnk");
 var portFull = Path.Combine(Environment.CurrentDirectory, port);
 
 Console.WriteLine("Creating shortcut:");
 Console.WriteLine($"Location: {shortcutPath}");
 Console.WriteLine($"Arguments: \"{portFull}\" {arguments}");
-
-Directory.CreateDirectory(Path.Combine(Environment.CurrentDirectory, config.ShortcutsPath));
-
-new WindowsShortcut
+if (Prompt.Confirm("Continue?", true))
 {
-    WorkingDirectory = Path.GetDirectoryName(portFull),
-    Path = portFull,
-    Arguments = arguments,
-    Description = name
-}.Save(shortcutPath);
+    Directory.CreateDirectory(Path.Combine(Environment.CurrentDirectory, shortcutsPath));
+
+    new WindowsShortcut
+    {
+        WorkingDirectory = Path.GetDirectoryName(portFull),
+        Path = portFull,
+        Arguments = arguments,
+        Description = name
+    }.Save(shortcutPath);
+}
 
 return;
 
-string GetSelection(string type, string portsPath, bool allowSkip, params string[] searchPatterns)
+string GetSelectionSingle(string type, IEnumerable<string> opts)
 {
-    var options = searchPatterns
-        .Aggregate(Enumerable.Empty<string>(),
-            (acc, pat) => acc.Concat(Directory.EnumerateFiles(portsPath, pat, SearchOption.AllDirectories)))
-        .Order()
-        .ToList();
-    
+    var options = opts.ToList();
     if (options.Count == 0)
-        Console.Error.WriteLine($"No {type}s found under {portsPath}");
+        Console.Error.WriteLine($"No {type}s found");
     
-    if (allowSkip)
-        options.Insert(0, "-");
-    
-    var selected = Prompt.Select($"Which {type}?" + (allowSkip ? " ('-' to skip)" : ""), options);
-    Console.WriteLine($"Selected {type}: " + selected);
-    return selected;
+    options.Sort();
+    return Prompt.Select($"Which {type}?", options);
 }
 
-internal class Config
+IReadOnlyList<string> GetSelectionMultiple(string type, IEnumerable<string> opts)
 {
-    public string PortsPath { get; set; } = "Ports";
-    public string IWadsPath { get; set; } = "IWADs";
-    public string PWadsPath { get; set; } = "PWADs";
-    public string ShortcutsPath { get; set; } = "Shortcuts";
+    var options = opts.ToList();
+    if (options.Count == 0)
+        return [];
+    
+    options.Sort();
+    return Prompt.MultiSelect($"Which {type}?", options, minimum: 0).ToList();
 }
+
+IEnumerable<string> FindFiles(string pat) =>
+    Directory.EnumerateFiles(Environment.CurrentDirectory, pat, SearchOption.AllDirectories);

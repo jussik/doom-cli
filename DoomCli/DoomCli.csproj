@@ -12,6 +12,8 @@
 
     <PropertyGroup Condition="'$(Configuration)' != 'Debug'">
         <PublishSingleFile>true</PublishSingleFile>
+        <DebugSymbols>False</DebugSymbols>
+        <DebugType>None</DebugType>
     </PropertyGroup>
 
     <ItemGroup>
