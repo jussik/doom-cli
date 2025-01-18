@@ -1,4 +1,6 @@
-﻿using System.Text;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Globalization;
+using System.Text;
 using Sharprompt;
 using WindowsShortcutFactory;
 
@@ -30,11 +32,30 @@ var wadsByType = FindFiles("*.wad")
 // true = IWAD, false = PWAD
 string iwad = GetSelectionSingle("IWAD", wadsByType[true]);
 IReadOnlyList<string> pwads = GetSelectionMultiple("PWADs",
-    wadsByType[false].Concat(FindFiles("*.pk3")));
+    wadsByType[false].Concat(FindFiles("*.pk3")).Concat(FindFiles("*.zip")));
 
-var name = Prompt.Input<string>("Shortcut name?", pwads.Count > 0
-    ? string.Join(" ", pwads.Select(wad => Path.GetFileName(Path.GetDirectoryName(wad))).Distinct())
-    : Path.GetFileName(iwad));
+const string customLabel = "Custom...";
+List<string> potentialNames = pwads.Count > 0
+    ? pwads.Select(Path.GetFileNameWithoutExtension) // PWAD filenames
+        .Concat(pwads.Select(wad => Path.GetFileName(Path.GetDirectoryName(wad)))) // PWAD parent folder names
+        .Select(s => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(s!))
+        .Distinct()
+        .Order()
+        .Append(customLabel)
+        .ToList()
+    : [Path.GetFileNameWithoutExtension(iwad), customLabel]; // IWAD filename if no PWADs
+string? name = Prompt.Select("Shortcut name?", potentialNames, defaultValue: potentialNames[0]);
+
+if (name == customLabel)
+{
+    name = Prompt.Input<string>("Specify shortcut name",
+        validators:
+        [
+            o => o is string s && !string.IsNullOrWhiteSpace(s)
+                ? ValidationResult.Success
+                : new ValidationResult("Name cannot be empty")
+        ]);
+}
 
 var argsBuilder = new StringBuilder();
 argsBuilder.Append("-iwad \"");
