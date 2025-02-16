@@ -1,7 +1,7 @@
 ﻿using DoomCli;
 using Sharprompt;
 
-IReadOnlyList<WadFile> allWads = Loader.LoadWads();
+IReadOnlyList<WadFile> allWads = WadLoader.LoadWads();
 
 var wizard = new ShortcutWizard(allWads);
 if (wizard.BuildShortcut() is { } shortcut)

@@ -1,4 +1,5 @@
-﻿using System.IO.Compression;
+﻿using System.Globalization;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -6,7 +7,7 @@ using nz.doom.WadParser;
 
 namespace DoomCli;
 
-public record WadFile(string FilePath, string Key, DateTimeOffset LastModified, IWadData Wad);
+public record WadFile(string FilePath, string Key, DateTime LastModified, IWadData Wad);
 
 [JsonSourceGenerationOptions]
 [JsonSerializable(typeof(WadCache))]
@@ -18,7 +19,7 @@ public class WadCache
     public required Dictionary<string, WadData> Wads { get; init; } = new();
 }
 
-public static class Loader
+public static class WadLoader
 {
     private const int CacheVersion = 1;
     private static readonly string CachePath = Path.Combine(Path.GetTempPath(), "DoomCli_cache.json");
@@ -34,10 +35,10 @@ public static class Loader
         HashSet<string> cachedKeys = new(wads.Keys);
         List<WadFile> wadFiles = LoadWadsImpl(wads);
 
-        if (!cachedKeys.SetEquals(wadFiles.Select(w => w.Key)))
+        HashSet<string> foundKeys = wadFiles.Select(w => w.Key).ToHashSet();
+        if (!cachedKeys.SetEquals(foundKeys))
         {
-            HashSet<string> wadKeys = wadFiles.Select(w => w.Key).ToHashSet();
-            foreach (string key in cachedKeys.Except(wadKeys))
+            foreach (string key in cachedKeys.Except(foundKeys))
                 wads.Remove(key);
             UpdateWadsToCache(wads);
         }
@@ -56,12 +57,8 @@ public static class Loader
         var zips = FileUtils.ListFiles("*.pk3").Concat(FileUtils.ListFiles("*.zip"));
         foreach (string zipPath in zips)
         {
-            string key;
-            using (var fs = File.OpenRead(zipPath))
-            {
-                key = GetFileKey(Path.GetFileName(zipPath), fs);
-            }
-
+            DateTime lastModified = File.GetLastWriteTime(zipPath);
+            string key = GetFileKey(zipPath, lastModified);
             if (!wadsByKey.TryGetValue(key, out var wad))
             {
                 var builder = new WadDataBuilder(zipPath);
@@ -87,29 +84,28 @@ public static class Loader
                 wadsByKey[key] = wad = builder.Build();
             }
 
-            wadFiles.Add(new WadFile(zipPath, key, File.GetLastWriteTime(zipPath), wad));
+            wadFiles.Add(new WadFile(zipPath, key, lastModified, wad));
         }
 
         foreach (string wadPath in FileUtils.ListFiles("*.wad"))
         {
-            using var fs = File.OpenRead(wadPath);
-            string key = GetFileKey(Path.GetFileName(wadPath), fs);
-
+            DateTime lastModified = File.GetLastWriteTime(wadPath);
+            string key = GetFileKey(wadPath, lastModified);
             if (!wadsByKey.TryGetValue(key, out var wad))
             {
-                fs.Position = 0;
+                using var fs = File.OpenRead(wadPath);
                 wadsByKey[key] = wad = new WadDataBuilder(wadPath)
                     .Add(WadParser.Parse(fs))
                     .Build();
             }
             
-            wadFiles.Add(new WadFile(wadPath, key, File.GetLastWriteTime(wadPath), wad));
+            wadFiles.Add(new WadFile(wadPath, key, lastModified, wad));
         }
 
         return wadFiles;
         
-        string GetFileKey(string filename, FileStream fs) =>
-            $"{filename}:{Convert.ToBase64String(sha.ComputeHash(fs))}";
+        string GetFileKey(string filePath, DateTime lastModified) =>
+            $"{Path.GetFileName(filePath)}:{lastModified.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture)}";
     }
 
     private static Dictionary<string, WadData>? GetWadsFromCache()
