@@ -1,0 +1,3 @@
+[submodule "WadParser-dotnet"]
+	path = WadParser-dotnet
+	url = https://github.com/IS4Code/WadParser-dotnet.git
