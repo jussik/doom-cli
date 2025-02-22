@@ -1,10 +1,11 @@
 ﻿using DoomCli;
 using Sharprompt;
 
-IReadOnlyList<WadFile> allWads = WadLoader.LoadWads();
+// Set working directory to the directory of the executable to ensure relative paths are resolved correctly
+if (args.Contains("--relative-to-exe") && Environment.ProcessPath is { } exePath)
+    Directory.SetCurrentDirectory(Path.GetDirectoryName(exePath)!);
 
-var wizard = new ShortcutWizard(allWads);
-if (wizard.BuildShortcut() is { } shortcut)
+if (new ShortcutWizard().BuildShortcut(args) is { } shortcut)
 {
     Console.WriteLine($"Creating shortcut: {shortcut.ShortcutPath}");
     Console.WriteLine($"\"{shortcut.ExecutablePath}\" {shortcut.Arguments}");
