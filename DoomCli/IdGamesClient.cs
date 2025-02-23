@@ -26,13 +26,20 @@ public class IdGamesClient : IDisposable
             IdGamesSourceGenerationContext.Default.IdGamesEntryResponse).Result!.Content;
     }
 
-    public void Download(IdGamesEntry entry, string destination, Action<DownloadProgress> progressCallback)
+    public static void Download(IdGamesEntry entry, string destination, Action<DownloadProgress> progressCallback)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-        using var dlClient = new WebClient();
         using var ctSrc = new CancellationTokenSource();
+        using var dlClient = new WebClient();
         
-        dlClient.DownloadFileCompleted += (_, _) => ctSrc.Cancel();
+        dlClient.DownloadFileCompleted += (_, args) =>
+        {
+            if (args.Error != null)
+                throw new ApplicationException("Download failed: " + args.Error.Message, args.Error);
+            if (args.Cancelled)
+                throw new ApplicationException("Download failed");
+            ctSrc.Cancel();
+        };
         dlClient.DownloadProgressChanged += (_, args) =>
             progressCallback(new DownloadProgress(args.TotalBytesToReceive, args.BytesReceived));
 

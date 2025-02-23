@@ -71,10 +71,17 @@ public class WadLoader
         string key = GetFileKey(wadPath, lastModified);
         if (!wads.TryGetValue(key, out var wad))
         {
-            using var fs = File.OpenRead(wadPath);
-            wads[key] = wad = new WadDataBuilder(wadPath)
-                .Add(WadParser.Parse(fs))
-                .Build();
+            using FileStream fs = File.OpenRead(wadPath);
+            var builder = new WadDataBuilder(wadPath).Add(WadParser.Parse(fs));
+
+            if (!builder.IsWadinfoComplete)
+            {
+                string textFile = Path.ChangeExtension(wadPath, "txt");
+                if (File.Exists(textFile))
+                    builder.AddWadinfoText(File.ReadAllText(textFile));
+            }
+            
+            wads[key] = wad = builder.Build();
             isDirty = true;
         }
             
@@ -106,6 +113,30 @@ public class WadLoader
                     ms.Position = 0;
                     builder.Add(WadParser.Parse(ms));
                 }
+
+                if (!builder.IsWadinfoComplete)
+                {
+                    char[] testBuffer = new char[4];
+                    foreach (ZipArchiveEntry entry in zip.Entries.Where(e =>
+                                 e.Name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        // check if it's a potential WADINFO lump equivalent in a separate text file
+                        using var reader = new StreamReader(entry.Open());
+                        if (reader.ReadBlock(testBuffer, 0, 4) == 4 && testBuffer.SequenceEqual("===="))
+                        {
+                            builder.AddWadinfoText(reader.ReadToEnd());
+                            if (builder.IsWadinfoComplete)
+                                break;
+                        }
+                    }
+                }
+            }
+
+            if (!builder.IsWadinfoComplete)
+            {
+                string textFile = Path.ChangeExtension(zipPath, "txt");
+                if (File.Exists(textFile))
+                    builder.AddWadinfoText(File.ReadAllText(textFile));
             }
 
             wads[key] = wad = builder.Build();
@@ -152,11 +183,15 @@ public class WadLoader
     {
         if (!isDirty)
             return;
+
         try
         {
             using var fs = File.OpenWrite(CachePath);
             fs.SetLength(0);
-            JsonSerializer.Serialize(fs, new WadCache {Version = CacheVersion, Wads = wads}, WadLoaderSourceGenerationContext.Default.WadCache);
+            JsonSerializer.Serialize(fs,
+                // only cache wads we have found files for
+                new WadCache {Version = CacheVersion, Wads = wadFiles.ToDictionary(w => w.Key, w => wads[w.Key])},
+                WadLoaderSourceGenerationContext.Default.WadCache);
         }
         catch (Exception e)
         {

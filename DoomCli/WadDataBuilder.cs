@@ -50,6 +50,15 @@ public partial class WadDataBuilder
         return this;
     }
 
+    public WadDataBuilder AddWadinfoText(string text)
+    {
+        ParseWadinfo(text);
+        return this;
+    }
+
+    public bool IsWadinfoComplete
+        => data.Title != null && (data.Complevel != null || data.ComplevelHint != null) && data.IwadName != null;
+
     private void ParseWadinfo(string lump)
     {
         if (data.Title == null && TryExtractValue(WadinfoTitleRegex(), lump, out string title))

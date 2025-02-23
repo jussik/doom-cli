@@ -16,50 +16,7 @@ public class ShortcutWizard
         var loader = new WadLoader();
         loader.LoadWads();
 
-        string? argWadPath = null;
-        if (args.FirstOrDefault(a => a.StartsWith("idgames://")) is { } igUri)
-        {
-            using var idg = new IdGamesClient();
-            IdGamesEntry entry = idg.GetEntry(igUri);
-            
-            Console.WriteLine($"idGames entry: {entry.Title}");
-
-            if (loader.Wads.FirstOrDefault(w =>
-                    w.FilePath.EndsWith(entry.Filename, StringComparison.OrdinalIgnoreCase) &&
-                    new FileInfo(w.FilePath).Length == entry.Size) is {FilePath: var fp})
-            {
-                argWadPath = fp;
-                Console.WriteLine($"File already exists at path: {argWadPath}");
-            }
-            else
-            {
-                string dlPath = Prompt.Select("Select download destination for WAD",
-                                    loader.Wads
-                                        .ToLookup(w => Path.GetDirectoryName(w.FilePath)!)
-                                        .OrderByDescending(g => g.Count())
-                                        .Take(5)
-                                        .Select(string? (g) => g.Key)
-                                        .Append(null),
-                                    textSelector: p => p ?? "Custom...")
-                                ?? Prompt.Input<string>(
-                                    "Destination path relative to current directory, or leave empty for current directory");
-
-                argWadPath = Path.Combine(Environment.CurrentDirectory, dlPath, entry.Filename);
-                Console.WriteLine($"Downloading to {argWadPath}...");
-                
-                Stopwatch debounce = Stopwatch.StartNew();
-                idg.Download(entry, argWadPath, prog =>
-                {
-                    if (debounce.ElapsedMilliseconds < 100)
-                        return;
-                    Console.Write($"\r{100.0 * prog.BytesReceived / prog.TotalBytes:#}% ({prog.BytesReceived / 1024:N0} of {prog.TotalBytes / 1024:N0} KB)");
-                    debounce.Restart();
-                });
-                Console.Write('\r');
-
-                loader.AddFile(argWadPath);
-            }
-        }
+        WadFile? argWad = GetWadFromArgs();
         
         loader.UpdateCacheFile();
         
@@ -98,9 +55,59 @@ public class ShortcutWizard
             Arguments = BuildArguments()
         };
 
+        WadFile? GetWadFromArgs()
+        {
+            if (args.FirstOrDefault(a => a.StartsWith("idgames://")) is not { } igUri)
+                return null;
+
+            IdGamesEntry entry;
+            using (var idg = new IdGamesClient())
+            {
+                entry = idg.GetEntry(igUri);
+            }
+            
+            Console.WriteLine($"Found idGames entry '{entry.Title}' at {igUri}");
+
+            if (loader.Wads.FirstOrDefault(w =>
+                    w.FilePath.EndsWith(entry.Filename, StringComparison.OrdinalIgnoreCase) &&
+                    new FileInfo(w.FilePath).Length == entry.Size) is {} wad)
+            {
+                Console.WriteLine($"File already exists at path: {wad.FilePath}");
+                return wad;
+            }
+
+            List<string?> dlPaths = loader.Wads
+                .ToLookup(w => Path.GetDirectoryName(w.FilePath)!)
+                .OrderByDescending(g => g.Count())
+                .Take(5)
+                .Select(string? (g) => g.Key)
+                .Append(null)
+                .ToList();
+            string dlPath = Prompt.Select("Select download destination for WAD",
+                                dlPaths,
+                                defaultValue: dlPaths[0],
+                                textSelector: p => p ?? "Custom...")
+                            ?? Prompt.Input<string>(
+                                "Destination path relative to current directory, or leave empty for current directory");
+
+            string wadPath = Path.Combine(Environment.CurrentDirectory, dlPath, entry.Filename);
+            Console.WriteLine($"Downloading to {wadPath}...");
+                
+            Stopwatch debounce = Stopwatch.StartNew();
+            IdGamesClient.Download(entry, wadPath, prog =>
+            {
+                if (debounce.ElapsedMilliseconds < 50)
+                    return;
+                Console.Write($"\r{100.0 * prog.BytesReceived / prog.TotalBytes:#}% ({prog.BytesReceived / 1024:N0} of {prog.TotalBytes / 1024:N0} KB)");
+                debounce.Restart();
+            });
+            Console.Write('\r');
+
+            return loader.AddFile(wadPath);
+        }
+
         List<WadFile> SelectWads()
         {
-            WadFile? argWad = loader.Wads.FirstOrDefault(w => w.FilePath == argWadPath);
             return Prompt.MultiSelect(new MultiSelectOptions<WadFile>
             {
                 Items = argWad != null
@@ -149,10 +156,6 @@ public class ShortcutWizard
                 Console.WriteLine($"Complevel already specified: {implComplevel}");
                 return null;
             }
-
-            var prompt = "Select compatibility level";
-            if (pwads.Select(w => w.Wad.ComplevelHint).FirstOrDefault(h => h != null) is { } hint)
-                prompt += $" (hint: {hint})";
             
             int vanillaLevel = iwad.Wad.IwadName switch
             {
@@ -161,18 +164,37 @@ public class ShortcutWizard
                 "TNT.WAD" or "PLUTONIA.WAD" => 4,
                 _ => 0
             };
+            (string name, int? value)[] items = [
+                ("Default or ZDoom", null),
+                ($"Vanilla or Limit removing ({vanillaLevel})", vanillaLevel),
+                ("Boom (9)", 9),
+                ("MBF (11)", 11),
+                ("MBF21 (21)", 21),
+                ("Custom...", -1)
+            ];
+
+            var prompt = "Select compatibility level";
+            int? defaultValue = null;
+            if (pwads.Select(w => w.Wad.ComplevelHint).FirstOrDefault(h => h != null) is { } hint)
+            {
+                prompt += $" (hint: {hint})";
+                if (hint.Contains("MBF21", StringComparison.OrdinalIgnoreCase) ||
+                    hint.Contains("MBF 21", StringComparison.OrdinalIgnoreCase))
+                    defaultValue = 21;
+                else if (hint.Contains("MBF", StringComparison.OrdinalIgnoreCase))
+                    defaultValue = 11;
+                else if (hint.Contains("Boom", StringComparison.OrdinalIgnoreCase))
+                    defaultValue = 9;
+                else if (hint.Contains("Vanilla", StringComparison.OrdinalIgnoreCase) ||
+                         hint.Contains("Limit removing", StringComparison.OrdinalIgnoreCase))
+                    defaultValue = vanillaLevel;
+            }
+            
             int? selectedCl = Prompt.Select(new SelectOptions<(string name, int? value)>
             {
                 Message = prompt,
-                Items =
-                [
-                    ("None", null),
-                    ($"Vanilla/Limit removing ({vanillaLevel})", vanillaLevel),
-                    ("Boom (9)", 9),
-                    ("MBF (11)", 11),
-                    ("MBF21 (21)", 21),
-                    ("Custom...", -1)
-                ],
+                Items = items,
+                DefaultValue = items.FirstOrDefault(i => i.value == defaultValue),
                 TextSelector = p => p.name
             }).value;
 
@@ -185,24 +207,22 @@ public class ShortcutWizard
 
         string GetShortcutName()
         {
-            const string customLabel = "Custom...";
-            List<string> potentialNames = selectedWads
+            List<string?> potentialNames = selectedWads
                 .SelectMany(w => w.Wad.Title != null ? new[] {w.Wad.Title, w.Wad.Name} : new[] {w.Wad.Name})
                 .Select(s => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(s))
                 .Distinct()
                 .Order(StringComparer.InvariantCultureIgnoreCase)
-                .Append(customLabel)
+                .Append(null)
                 .ToList();
-            string givenName = Prompt.Select("Shortcut name?", potentialNames, defaultValue: potentialNames[0]);
-            return givenName != customLabel
-                ? givenName
-                : Prompt.Input<string>("Enter shortcut name",
-                    validators:
-                    [
-                        o => o is string s && !string.IsNullOrWhiteSpace(s)
-                            ? ValidationResult.Success
-                            : new ValidationResult("Name cannot be empty")
-                    ]);
+            return Prompt.Select("Shortcut name?", potentialNames,
+                       defaultValue: potentialNames[0], textSelector: n => n ?? "Custom...")
+                   ?? Prompt.Input<string>("Enter shortcut name",
+                       validators:
+                       [
+                           o => o is string s && !string.IsNullOrWhiteSpace(s)
+                               ? ValidationResult.Success
+                               : new ValidationResult("Name cannot be empty")
+                       ]);
         }
 
         string BuildArguments()
