@@ -2,11 +2,12 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using Sharprompt;
 
 namespace DoomCli;
 
-public class ShortcutWizard
+public partial class ShortcutWizard
 {
     private static readonly string ShortcutsBasePath =
         Environment.ExpandEnvironmentVariables(@"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Doom");
@@ -207,9 +208,16 @@ public class ShortcutWizard
 
         string GetShortcutName()
         {
+            char[] illegalChars = Path.GetInvalidFileNameChars();
             List<string?> potentialNames = selectedWads
                 .SelectMany(w => w.Wad.Title != null ? new[] {w.Wad.Title, w.Wad.Name} : new[] {w.Wad.Name})
-                .Select(s => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(s))
+                .Select(s =>
+                {
+                    s = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(s);
+                    s = string.Concat(s.Split(illegalChars, StringSplitOptions.RemoveEmptyEntries));
+                    s = WhitespaceRegex().Replace(s, " ");
+                    return s;
+                })
                 .Distinct()
                 .Order(StringComparer.InvariantCultureIgnoreCase)
                 .Append(null)
@@ -219,9 +227,11 @@ public class ShortcutWizard
                    ?? Prompt.Input<string>("Enter shortcut name",
                        validators:
                        [
-                           o => o is string s && !string.IsNullOrWhiteSpace(s)
-                               ? ValidationResult.Success
-                               : new ValidationResult("Name cannot be empty")
+                           o => o is not string s || string.IsNullOrWhiteSpace(s)
+                               ? new ValidationResult("Name cannot be empty")
+                               : s.IndexOfAny(illegalChars) >= 0
+                                   ? new ValidationResult("Name contains illegal characters")
+                                   : ValidationResult.Success
                        ]);
         }
 
@@ -252,4 +262,7 @@ public class ShortcutWizard
             return argsBuilder.ToString();
         }
     }
+
+    [GeneratedRegex(@"\s{2,}")]
+    private static partial Regex WhitespaceRegex();
 }
