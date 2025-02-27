@@ -3,17 +3,13 @@ using System.Text.RegularExpressions;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
-namespace DoomCli;
+namespace DoomCli.Shortcut;
 
-public partial class ShortcutSettings : CommandSettings
+public partial class ShortcutSettings : CommonSettings
 {
-    [Description("Set working directory to the directory of the executable, useful for executing from a custom protocol link")]
-    [CommandOption("--relative-to-exe")]
-    public bool RelativeToExe { get; set; }
-    
-    [Description("idgames:// URI to download WAD from")]
+    [Description("idgames:// URI to download from")]
     [CommandArgument(0, "[uri]")]
-    public string IdGamesUri { get; set; }
+    public string? IdGamesUri { get; set; }
 
     public override ValidationResult Validate()
     {
@@ -23,6 +19,6 @@ public partial class ShortcutSettings : CommandSettings
         return ValidationResult.Success();
     }
 
-    [GeneratedRegex(@"^idgames://\d+$")]
+    [GeneratedRegex(@"^idgames://\d+/?$")]
     private static partial Regex IdgamesUriRegex();
 }

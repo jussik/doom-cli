@@ -10,9 +10,10 @@ public static class CliPrompt
     public static bool Confirm(string message, bool defaultValue = false)
         => Prompt.Confirm(message, defaultValue);
 
-    public static string Input(string message, Func<string, ValidationResult?>? validator = null)
+    public static string Input(string message, Func<string, ValidationResult?>? validator = null, string? defaultValue = null)
         => Prompt.Input<string>(message,
-            validators: validator != null ? [v => v is string s ? validator(s) : ValidationResult.Success] : null);
+            validators: validator != null ? [v => v is string s ? validator(s) : ValidationResult.Success] : null,
+            placeholder: defaultValue);
 
     public static T Select<T>(string message, IEnumerable<Selection<T>> items, T? defaultValue = default)
     {

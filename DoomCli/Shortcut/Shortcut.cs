@@ -1,6 +1,6 @@
 ﻿using WindowsShortcutFactory;
 
-namespace DoomCli;
+namespace DoomCli.Shortcut;
 
 public class Shortcut
 {

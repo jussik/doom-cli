@@ -1,0 +1,4 @@
+﻿<linker>
+    <assembly fullname="Spectre.Console.Cli" preserve="all" />
+    <assembly fullname="DoomCli" preserve="all" />
+</linker>

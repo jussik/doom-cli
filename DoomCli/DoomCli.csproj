@@ -24,6 +24,10 @@
     </ItemGroup>
 
     <ItemGroup>
+        <TrimmerRootDescriptor Include="TrimRoots.xml" />
+    </ItemGroup>
+
+    <ItemGroup>
       <ProjectReference Include="..\WadParser-dotnet\WadParser\WadParser.csproj" />
     </ItemGroup>
 

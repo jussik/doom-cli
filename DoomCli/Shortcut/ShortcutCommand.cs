@@ -5,15 +5,14 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Spectre.Console.Cli;
 
-namespace DoomCli;
+namespace DoomCli.Shortcut;
 
 public partial class ShortcutCommand : Command<ShortcutSettings>
 {
-    private static readonly string ShortcutsBasePath =
-        Environment.ExpandEnvironmentVariables(@"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Doom");
-
     public override int Execute(CommandContext context, ShortcutSettings settings)
     {
+        var config = AppConfig.Load(settings);
+
         // Set working directory to the directory of the executable to ensure relative paths are resolved correctly
         if (settings.RelativeToExe && Environment.ProcessPath is { } exePath)
             Directory.SetCurrentDirectory(Path.GetDirectoryName(exePath)!);
@@ -27,7 +26,7 @@ public partial class ShortcutCommand : Command<ShortcutSettings>
         
         List<string> allExes = FileUtils.ListFiles("*.exe")
             .Where(f => !Path.GetFileName(f).Equals(
-                Environment.ProcessPath is { } exePath ? Path.GetFileName(exePath) : "DoomCli.exe",
+                Environment.ProcessPath is { } path ? Path.GetFileName(path) : "DoomCli.exe",
                 StringComparison.OrdinalIgnoreCase))
             .ToList();
         if (allExes.Count == 0)
@@ -55,7 +54,7 @@ public partial class ShortcutCommand : Command<ShortcutSettings>
         var shortcut = new Shortcut
         {
             Name = shortcutName,
-            ShortcutPath = Path.Combine(ShortcutsBasePath, shortcutName + ".lnk"),
+            ShortcutPath = Path.Combine(FileUtils.EvaluatePath(config.ShortcutsDirectory), shortcutName + ".lnk"),
             ExecutablePath = exe,
             Arguments = BuildArguments()
         };
@@ -95,7 +94,16 @@ public partial class ShortcutCommand : Command<ShortcutSettings>
                 .Select(g => new Selection<string?>(g.Key, g.Key))
                 .Append(new Selection<string?>(null, "Custom..."))
                 .ToList();
-            string dlPath = CliPrompt.Select("Select download destination for WAD", dlPaths)
+
+            string? defaultPath = null;
+            if (!string.IsNullOrWhiteSpace(config.DefaultDownloadDirectory))
+            {
+                defaultPath = FileUtils.EvaluatePath(config.DefaultDownloadDirectory);
+                dlPaths.RemoveAll(p => p.Value == defaultPath);
+                dlPaths.Insert(0, new Selection<string?>(defaultPath, defaultPath));
+            }
+
+            string dlPath = CliPrompt.Select("Select download destination for WAD", dlPaths, defaultPath)
                             ?? CliPrompt.Input(
                                 "Destination path relative to current directory, or leave empty for current directory");
 
@@ -199,7 +207,22 @@ public partial class ShortcutCommand : Command<ShortcutSettings>
                 : selectedCl?.ToString();
         }
 
-        string SelectExe() => CliPrompt.Select("Select executable", allExes.Select(s => new Selection<string>(s, s)));
+        string SelectExe()
+        {
+            string? defaultExe = null;
+            if (!string.IsNullOrWhiteSpace(config.DefaultSourcePort))
+            {
+                string defaultExePattern = config.DefaultSourcePort;
+                if (Path.AltDirectorySeparatorChar != Path.DirectorySeparatorChar)
+                {
+                    // ensure paths are normalized to the current OS
+                    defaultExePattern = defaultExePattern
+                        .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+                }
+                defaultExe = allExes.FirstOrDefault(e => e.Contains(defaultExePattern, StringComparison.OrdinalIgnoreCase));
+            }
+            return CliPrompt.Select("Select executable", allExes.Select(s => new Selection<string>(s, s)), defaultExe);
+        }
 
         string GetShortcutName()
         {
@@ -218,7 +241,7 @@ public partial class ShortcutCommand : Command<ShortcutSettings>
                 .Select(s => new Selection<string?>(s, s))
                 .Append(new Selection<string?>(null, "Custom..."))
                 .ToList();
-            return CliPrompt.Select("Shortcut name?", potentialNames)
+            return CliPrompt.Select("Shortcut name?", potentialNames, potentialNames[0].Value)
                    ?? CliPrompt.Input("Enter shortcut name",
                        s => string.IsNullOrWhiteSpace(s)
                            ? new ValidationResult("Name cannot be empty")

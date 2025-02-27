@@ -30,7 +30,9 @@ public class IdGamesClient : IDisposable
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         using var ctSrc = new CancellationTokenSource();
+#pragma warning disable SYSLIB0014
         using var dlClient = new WebClient();
+#pragma warning restore SYSLIB0014
         
         dlClient.DownloadFileCompleted += (_, args) =>
         {
