@@ -3,17 +3,21 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
-using Sharprompt;
+using Spectre.Console.Cli;
 
 namespace DoomCli;
 
-public partial class ShortcutWizard
+public partial class ShortcutCommand : Command<ShortcutSettings>
 {
     private static readonly string ShortcutsBasePath =
         Environment.ExpandEnvironmentVariables(@"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Doom");
 
-    public Shortcut? BuildShortcut(string[] args)
+    public override int Execute(CommandContext context, ShortcutSettings settings)
     {
+        // Set working directory to the directory of the executable to ensure relative paths are resolved correctly
+        if (settings.RelativeToExe && Environment.ProcessPath is { } exePath)
+            Directory.SetCurrentDirectory(Path.GetDirectoryName(exePath)!);
+        
         var loader = new WadLoader();
         loader.LoadWads();
 
@@ -29,45 +33,52 @@ public partial class ShortcutWizard
         if (allExes.Count == 0)
         {
             Console.WriteLine("No executables found");
-            return null;
+            return 1;
         }
 
         if (!loader.Wads.Any(w => w.Wad.IsIwad))
         {
             Console.WriteLine("No IWADs found");
-            return null;
+            return 1;
         }
         
         List<WadFile> selectedWads = SelectWads();
         List<WadFile> pwads = selectedWads.Where(w => !w.Wad.IsIwad).ToList();
         WadFile? iwad = SelectIwad();
         if (iwad == null)
-            return null; // PWAD specified IWAD that doesn't exist
+            return 1; // PWAD specified IWAD that doesn't exist
 
         string? complevel = SelectComplevel();
         string exe = SelectExe();
         string shortcutName = GetShortcutName();
 
-        return new Shortcut
+        var shortcut = new Shortcut
         {
             Name = shortcutName,
             ShortcutPath = Path.Combine(ShortcutsBasePath, shortcutName + ".lnk"),
             ExecutablePath = exe,
             Arguments = BuildArguments()
         };
+        
+        Console.WriteLine($"Creating shortcut: {shortcut.ShortcutPath}");
+        Console.WriteLine($"\"{shortcut.ExecutablePath}\" {shortcut.Arguments}");
+        if (CliPrompt.Confirm("Continue?", true))
+            shortcut.Save();
+
+        return 0;
 
         WadFile? GetWadFromArgs()
         {
-            if (args.FirstOrDefault(a => a.StartsWith("idgames://")) is not { } igUri)
+            if (string.IsNullOrEmpty(settings.IdGamesUri))
                 return null;
 
             IdGamesEntry entry;
             using (var idg = new IdGamesClient())
             {
-                entry = idg.GetEntry(igUri);
+                entry = idg.GetEntry(settings.IdGamesUri);
             }
             
-            Console.WriteLine($"Found idGames entry '{entry.Title}' at {igUri}");
+            Console.WriteLine($"Found idGames entry '{entry.Title}' at {settings.IdGamesUri}");
 
             if (loader.Wads.FirstOrDefault(w =>
                     w.FilePath.EndsWith(entry.Filename, StringComparison.OrdinalIgnoreCase) &&
@@ -77,18 +88,15 @@ public partial class ShortcutWizard
                 return wad;
             }
 
-            List<string?> dlPaths = loader.Wads
+            List<Selection<string?>> dlPaths = loader.Wads
                 .ToLookup(w => Path.GetDirectoryName(w.FilePath)!)
                 .OrderByDescending(g => g.Count())
                 .Take(5)
-                .Select(string? (g) => g.Key)
-                .Append(null)
+                .Select(g => new Selection<string?>(g.Key, g.Key))
+                .Append(new Selection<string?>(null, "Custom..."))
                 .ToList();
-            string dlPath = Prompt.Select("Select download destination for WAD",
-                                dlPaths,
-                                defaultValue: dlPaths[0],
-                                textSelector: p => p ?? "Custom...")
-                            ?? Prompt.Input<string>(
+            string dlPath = CliPrompt.Select("Select download destination for WAD", dlPaths)
+                            ?? CliPrompt.Input(
                                 "Destination path relative to current directory, or leave empty for current directory");
 
             string wadPath = Path.Combine(Environment.CurrentDirectory, dlPath, entry.Filename);
@@ -108,19 +116,14 @@ public partial class ShortcutWizard
         }
 
         List<WadFile> SelectWads()
-        {
-            return Prompt.MultiSelect(new MultiSelectOptions<WadFile>
-            {
-                Items = argWad != null
+            => CliPrompt.MultiSelect("Select WADs to include",
+                (argWad != null
                     ? loader.Wads.OrderByDescending(w => w == argWad)
                         .ThenByDescending(w => w.LastModified)
-                    : loader.Wads.OrderByDescending(w => w.LastModified),
-                DefaultValues = argWad != null ? [argWad] : [],
-                TextSelector = t => $"{t.Wad.Title ?? t.Wad.Name} ({t.FilePath})",
-                Minimum = 1,
-                Message = "Select WADs to include"
-            }).ToList();
-        }
+                    : loader.Wads.OrderByDescending(w => w.LastModified))
+                .Select(w => new Selection<WadFile>(w, $"{w.Wad.Title ?? w.Wad.Name} ({w.FilePath})")),
+                argWad != null ? [argWad] : []
+            ).ToList();
 
         WadFile? SelectIwad()
         {
@@ -142,12 +145,10 @@ public partial class ShortcutWizard
                 return null;
             }
 
-            return Prompt.Select(new SelectOptions<WadFile>
-            {
-                Items = loader.Wads.Where(w => w.Wad.IsIwad).OrderBy(w => w.FilePath),
-                TextSelector = t => $"{t.Wad.Title ?? t.Wad.Name} ({t.FilePath})",
-                Message = "Select IWAD"
-            });
+            return CliPrompt.Select("Select IWAD", loader.Wads
+                .Where(w => w.Wad.IsIwad)
+                .OrderBy(w => w.FilePath)
+                .Select(w => new Selection<WadFile>(w, $"{w.Wad.Title ?? w.Wad.Name} ({w.FilePath})")));
         }
 
         string? SelectComplevel()
@@ -165,13 +166,13 @@ public partial class ShortcutWizard
                 "TNT.WAD" or "PLUTONIA.WAD" => 4,
                 _ => 0
             };
-            (string name, int? value)[] items = [
-                ("Default or ZDoom", null),
-                ($"Vanilla or Limit removing ({vanillaLevel})", vanillaLevel),
-                ("Boom (9)", 9),
-                ("MBF (11)", 11),
-                ("MBF21 (21)", 21),
-                ("Custom...", -1)
+            Selection<int?>[] items = [
+                new(null, "Default or ZDoom"),
+                new(vanillaLevel, $"Vanilla or Limit removing ({vanillaLevel})"),
+                new(9, "Boom (9)"),
+                new(11, "MBF (11)"),
+                new(21, "MBF21 (21)"),
+                new(-1, "Custom...")
             ];
 
             var prompt = "Select compatibility level";
@@ -190,26 +191,20 @@ public partial class ShortcutWizard
                          hint.Contains("Limit removing", StringComparison.OrdinalIgnoreCase))
                     defaultValue = vanillaLevel;
             }
-            
-            int? selectedCl = Prompt.Select(new SelectOptions<(string name, int? value)>
-            {
-                Message = prompt,
-                Items = items,
-                DefaultValue = items.FirstOrDefault(i => i.value == defaultValue),
-                TextSelector = p => p.name
-            }).value;
+
+            int? selectedCl = CliPrompt.Select(prompt, items, defaultValue);
 
             return selectedCl == -1
-                ? Prompt.Input<string>("Enter complevel parameter")
+                ? CliPrompt.Input("Enter complevel parameter")
                 : selectedCl?.ToString();
         }
 
-        string SelectExe() => Prompt.Select("Select executable", allExes);
+        string SelectExe() => CliPrompt.Select("Select executable", allExes.Select(s => new Selection<string>(s, s)));
 
         string GetShortcutName()
         {
             char[] illegalChars = Path.GetInvalidFileNameChars();
-            List<string?> potentialNames = selectedWads
+            var potentialNames = selectedWads
                 .SelectMany(w => w.Wad.Title != null ? new[] {w.Wad.Title, w.Wad.Name} : new[] {w.Wad.Name})
                 .Select(s =>
                 {
@@ -220,19 +215,16 @@ public partial class ShortcutWizard
                 })
                 .Distinct()
                 .Order(StringComparer.InvariantCultureIgnoreCase)
-                .Append(null)
+                .Select(s => new Selection<string?>(s, s))
+                .Append(new Selection<string?>(null, "Custom..."))
                 .ToList();
-            return Prompt.Select("Shortcut name?", potentialNames,
-                       defaultValue: potentialNames[0], textSelector: n => n ?? "Custom...")
-                   ?? Prompt.Input<string>("Enter shortcut name",
-                       validators:
-                       [
-                           o => o is not string s || string.IsNullOrWhiteSpace(s)
-                               ? new ValidationResult("Name cannot be empty")
-                               : s.IndexOfAny(illegalChars) >= 0
-                                   ? new ValidationResult("Name contains illegal characters")
-                                   : ValidationResult.Success
-                       ]);
+            return CliPrompt.Select("Shortcut name?", potentialNames)
+                   ?? CliPrompt.Input("Enter shortcut name",
+                       s => string.IsNullOrWhiteSpace(s)
+                           ? new ValidationResult("Name cannot be empty")
+                           : s.IndexOfAny(illegalChars) >= 0
+                               ? new ValidationResult("Name contains illegal characters")
+                               : ValidationResult.Success);
         }
 
         string BuildArguments()
