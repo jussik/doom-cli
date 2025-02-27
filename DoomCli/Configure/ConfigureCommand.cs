@@ -27,6 +27,19 @@ public class ConfigureCommand : Command<CommonSettings>
         Console.WriteLine("Environment variables such as %APPDATA% are supported");
         Console.WriteLine("The substitutions $Desktop$, $StartMenu$ and $MyDocuments$ are available for common user folders");
         Console.WriteLine($"Configurations are stored in {settings.ConfigurationFile}");
+        
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            if (GetCurrentIdGamesProtocolCommand() is { } protocolCmd)
+            {
+                Console.WriteLine("idgames:// protocol handler is registered for the current user with command:");
+                Console.WriteLine(protocolCmd);
+            }
+            else
+            {
+                Console.WriteLine("idgames:// protocol handler is not registered for the current user");
+            }
+        }
 
         bool dirty = false;
         while (true)
@@ -39,9 +52,9 @@ public class ConfigureCommand : Command<CommonSettings>
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                if (GetCurrentIdGamesProtocolCommand() is {} cmd)
+                if (GetCurrentIdGamesProtocolCommand() != null)
                 {
-                    commonItems.Add(new(MenuOption.RegisterIdGamesProtocol, $"Reregister idgames:// protocol handler (current: {cmd})"));
+                    commonItems.Add(new(MenuOption.RegisterIdGamesProtocol, "Reregister idgames:// protocol handler"));
                     commonItems.Add(new(MenuOption.RemoveIdGamesProtocol, "Remove idgames:// protocol handler"));
                 }
                 else
@@ -78,8 +91,10 @@ public class ConfigureCommand : Command<CommonSettings>
             {
                 if (selection == MenuOption.RegisterIdGamesProtocol)
                 {
-                    RegisterIdGamesProtocol();
-                    Console.WriteLine("Registered idgames:// protocol handler for current user");
+                    string cmd = $"\"{Environment.GetCommandLineArgs()[0]}\" --relative-to-exe --config-file=\"{FileUtils.EvaluatePath(settings.ConfigurationFile)}\" \"%1\"";
+                    RegisterIdGamesProtocol(cmd);
+                    Console.WriteLine("Registered idgames:// protocol handler for current user with command:");
+                    Console.WriteLine(cmd);
                     continue;
                 }
                 if (selection == MenuOption.RemoveIdGamesProtocol)
@@ -119,13 +134,13 @@ public class ConfigureCommand : Command<CommonSettings>
     }
 
     [SupportedOSPlatform("windows")]
-    private void RegisterIdGamesProtocol()
+    private void RegisterIdGamesProtocol(string cmd)
     {
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\idgames");
         key.SetValue(null, "URL:idgames Protocol");
         key.SetValue("URL Protocol", "");
         using var commandKey = key.CreateSubKey(@"shell\open\command");
-        commandKey.SetValue(null, $"\"{Environment.GetCommandLineArgs()[0]}\" --relative-to-exe \"%1\"");
+        commandKey.SetValue(null, cmd);
     }
 
     [SupportedOSPlatform("windows")]
