@@ -1,8 +1,0 @@
-Windows Registry Editor Version 5.00
-
-[HKEY_CLASSES_ROOT\idgames]
-"URL Protocol"=""
-[HKEY_CLASSES_ROOT\idgames\shell]
-[HKEY_CLASSES_ROOT\idgames\shell\open]
-[HKEY_CLASSES_ROOT\idgames\shell\open\command] 
-@="\"C:\\Path\\to\\DoomCli.exe\" \"%1\" --relative-to-exe"
