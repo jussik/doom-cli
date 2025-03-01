@@ -6,14 +6,13 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <InvariantGlobalization>true</InvariantGlobalization>
-        <SelfContained>true</SelfContained>
         <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    </PropertyGroup>
-
-    <PropertyGroup Condition="'$(Configuration)' != 'Debug'">
+        
+        <SelfContained>true</SelfContained>
+        <PublishTrimmed>true</PublishTrimmed>
+        <PublishDir>bin\Publish</PublishDir>
         <PublishSingleFile>true</PublishSingleFile>
-        <DebugSymbols>False</DebugSymbols>
-        <DebugType>None</DebugType>
+        <TrimmerRemoveSymbols>true</TrimmerRemoveSymbols>
     </PropertyGroup>
 
     <ItemGroup>
