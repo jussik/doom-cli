@@ -31,7 +31,7 @@ public class WadLoader
     
     public void LoadWads()
     {
-        Console.Write("Loading WADs...\r");
+        Console.Write($"Loading WADs... from {Environment.CurrentDirectory}\r");
         
         LoadWadsFromCache();
         if (wads.Count > 0)

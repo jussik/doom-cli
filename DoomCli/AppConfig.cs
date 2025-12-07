@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace DoomCli;
@@ -9,9 +10,11 @@ internal partial class AppConfigSourceGenerationContext : JsonSerializerContext;
 
 public class AppConfig
 {
+    public string? WadsDirectory { get; set; }
     public string? DefaultDownloadDirectory { get; set; }
     public string? DefaultSourcePort { get; set; }
-    public string ShortcutsDirectory { get; set; } = @"$StartMenu$\Doom";
+    public string ShortcutsDirectory { get; set; } = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+        ? @"$StartMenu$\Doom" : "~/.local/share/applications";
     
     public static AppConfig Load(CommonSettings settings)
     {

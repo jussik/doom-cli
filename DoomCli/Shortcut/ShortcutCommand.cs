@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Spectre.Console.Cli;
@@ -9,13 +10,15 @@ namespace DoomCli.Shortcut;
 
 public partial class ShortcutCommand : Command<ShortcutSettings>
 {
-    public override int Execute(CommandContext context, ShortcutSettings settings)
+    public override int Execute(CommandContext context, ShortcutSettings settings, CancellationToken ct)
     {
         var config = AppConfig.Load(settings);
 
         // Set working directory to the directory of the executable to ensure relative paths are resolved correctly
         if (settings.RelativeToExe && Environment.ProcessPath is { } exePath)
             Directory.SetCurrentDirectory(Path.GetDirectoryName(exePath)!);
+        else if (!string.IsNullOrWhiteSpace(config.WadsDirectory))
+            Directory.SetCurrentDirectory(FileUtils.EvaluatePath(config.WadsDirectory));
         
         var loader = new WadLoader();
         loader.LoadWads();
@@ -31,8 +34,11 @@ public partial class ShortcutCommand : Command<ShortcutSettings>
             .ToList();
         if (allExes.Count == 0)
         {
-            Console.WriteLine("No executables found");
-            return 1;
+            if (string.IsNullOrWhiteSpace(config.DefaultSourcePort))
+            {
+                Console.WriteLine("No executables or default port found");
+                return 1;
+            }
         }
 
         if (!loader.Wads.Any(w => w.Wad.IsIwad))
@@ -54,7 +60,9 @@ public partial class ShortcutCommand : Command<ShortcutSettings>
         var shortcut = new Shortcut
         {
             Name = shortcutName,
-            ShortcutPath = Path.Combine(FileUtils.EvaluatePath(config.ShortcutsDirectory), shortcutName + ".lnk"),
+            ShortcutPath = Path.Combine(
+                FileUtils.EvaluatePath(config.ShortcutsDirectory),
+                shortcutName + (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ".lnk" : ".desktop")),
             ExecutablePath = exe,
             Arguments = BuildArguments()
         };
@@ -213,6 +221,9 @@ public partial class ShortcutCommand : Command<ShortcutSettings>
             if (!string.IsNullOrWhiteSpace(config.DefaultSourcePort))
             {
                 string defaultExePattern = config.DefaultSourcePort;
+                if (allExes.Count == 0)
+                    return defaultExePattern;
+                
                 if (Path.AltDirectorySeparatorChar != Path.DirectorySeparatorChar)
                 {
                     // ensure paths are normalized to the current OS

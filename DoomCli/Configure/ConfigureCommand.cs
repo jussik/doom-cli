@@ -1,6 +1,4 @@
 ﻿using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
-using Microsoft.Win32;
 using Spectre.Console.Cli;
 
 namespace DoomCli.Configure;
@@ -9,6 +7,7 @@ public class ConfigureCommand : Command<CommonSettings>
 {
     private enum MenuOption
     {
+        WadsDirectory,
         DefaultDownloadDirectory,
         DefaultSourcePort,
         ShortcutsDirectory,
@@ -18,49 +17,50 @@ public class ConfigureCommand : Command<CommonSettings>
         ExitWithoutSaving
     }
     
-    public override int Execute(CommandContext context, CommonSettings settings)
+    public override int Execute(CommandContext context, CommonSettings settings, CancellationToken ct)
     {
         var config = AppConfig.Load(settings);
+        CustomProtocol customProtocol = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? new CustomProtocolWindows()
+            : new CustomProtocolLinux();
         
         Console.WriteLine("Notes on configuration:");
         Console.WriteLine("Relative paths are supported, they are relative to the working directory when run");
-        Console.WriteLine("Environment variables such as %APPDATA% are supported");
-        Console.WriteLine("The substitutions $Desktop$, $StartMenu$ and $MyDocuments$ are available for common user folders");
-        Console.WriteLine($"Configurations are stored in {settings.ConfigurationFile}");
-        
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            if (GetCurrentIdGamesProtocolCommand() is { } protocolCmd)
-            {
-                Console.WriteLine("idgames:// protocol handler is registered for the current user with command:");
-                Console.WriteLine(protocolCmd);
-            }
-            else
-            {
-                Console.WriteLine("idgames:// protocol handler is not registered for the current user");
-            }
+            Console.WriteLine("Environment variables such as %APPDATA% are supported");
+            Console.WriteLine("The substitutions $Desktop$, $StartMenu$ and $MyDocuments$ are available for common user folders");
+        }
+        Console.WriteLine($"Configurations are stored in {settings.ConfigurationFile}");
+
+        if (customProtocol.GetCurrentIdGamesProtocolCommand() is { } protocolCmd)
+        {
+            Console.WriteLine("idgames:// protocol handler is registered for the current user with command:");
+            Console.WriteLine(protocolCmd);
+        }
+        else
+        {
+            Console.WriteLine("idgames:// protocol handler is not registered for the current user");
         }
 
         bool dirty = false;
         while (true)
         {
             List<Selection<MenuOption>> commonItems = [
+                new(MenuOption.WadsDirectory, $"Set directory to search for wads in, working directory if empty (current: {config.WadsDirectory})"),
                 new(MenuOption.DefaultDownloadDirectory, $"Set default download directory (current: {config.DefaultDownloadDirectory})"),
                 new(MenuOption.DefaultSourcePort, $"Set default source port (current: {config.DefaultSourcePort})"),
                 new(MenuOption.ShortcutsDirectory, $"Set shortcuts directory (current: {config.ShortcutsDirectory})")
             ];
 
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            if (customProtocol.GetCurrentIdGamesProtocolCommand() != null)
             {
-                if (GetCurrentIdGamesProtocolCommand() != null)
-                {
-                    commonItems.Add(new(MenuOption.RegisterIdGamesProtocol, "Reregister idgames:// protocol handler"));
-                    commonItems.Add(new(MenuOption.RemoveIdGamesProtocol, "Remove idgames:// protocol handler"));
-                }
-                else
-                {
-                    commonItems.Add(new(MenuOption.RegisterIdGamesProtocol, "Register idgames:// protocol handler"));
-                }
+                commonItems.Add(new(MenuOption.RegisterIdGamesProtocol, "Reregister idgames:// protocol handler"));
+                commonItems.Add(new(MenuOption.RemoveIdGamesProtocol, "Remove idgames:// protocol handler"));
+            }
+            else
+            {
+                commonItems.Add(new(MenuOption.RegisterIdGamesProtocol, "Register idgames:// protocol handler"));
             }
 
             List<Selection<MenuOption>> items = dirty
@@ -87,22 +87,22 @@ public class ConfigureCommand : Command<CommonSettings>
                 break;
             }
             
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            if (selection == MenuOption.RegisterIdGamesProtocol)
             {
-                if (selection == MenuOption.RegisterIdGamesProtocol)
-                {
-                    string cmd = $"\"{Environment.GetCommandLineArgs()[0]}\" --relative-to-exe --config-file=\"{FileUtils.EvaluatePath(settings.ConfigurationFile)}\" \"%1\"";
-                    RegisterIdGamesProtocol(cmd);
-                    Console.WriteLine("Registered idgames:// protocol handler for current user with command:");
-                    Console.WriteLine(cmd);
-                    continue;
-                }
-                if (selection == MenuOption.RemoveIdGamesProtocol)
-                {
-                    RemoveIdGamesProtocol();
-                    Console.WriteLine("Removed idgames:// protocol handler for current user");
-                    continue;
-                }
+                string currentExe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName
+                    ?? Environment.GetCommandLineArgs()[0];
+                string cmd = $"\"{currentExe}\" --config-file=\"{FileUtils.EvaluatePath(settings.ConfigurationFile)}\"";
+                customProtocol.RegisterIdGamesProtocol(cmd);
+                Console.WriteLine("Registered idgames:// protocol handler for current user with command:");
+                Console.WriteLine(cmd);
+                continue;
+            }
+            
+            if (selection == MenuOption.RemoveIdGamesProtocol)
+            {
+                customProtocol.RemoveIdGamesProtocol();
+                Console.WriteLine("Removed idgames:// protocol handler for current user");
+                continue;
             }
 
             if (selection == MenuOption.DefaultSourcePort)
@@ -113,6 +113,8 @@ public class ConfigureCommand : Command<CommonSettings>
 
             dirty |= selection switch
             {
+                MenuOption.WadsDirectory => UpdateConfig(config.WadsDirectory,
+                    v => config.WadsDirectory = v, null, true),
                 MenuOption.DefaultDownloadDirectory => UpdateConfig(config.DefaultDownloadDirectory,
                     v => config.DefaultDownloadDirectory = v, null, true),
                 MenuOption.DefaultSourcePort => UpdateConfig(config.DefaultSourcePort,
@@ -124,29 +126,6 @@ public class ConfigureCommand : Command<CommonSettings>
         }
         
         return 0;
-    }
-
-    [SupportedOSPlatform("windows")]
-    private string? GetCurrentIdGamesProtocolCommand()
-    {
-        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Classes\idgames");
-        return key?.OpenSubKey(@"shell\open\command")?.GetValue(null) as string;
-    }
-
-    [SupportedOSPlatform("windows")]
-    private void RegisterIdGamesProtocol(string cmd)
-    {
-        using var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\idgames");
-        key.SetValue(null, "URL:idgames Protocol");
-        key.SetValue("URL Protocol", "");
-        using var commandKey = key.CreateSubKey(@"shell\open\command");
-        commandKey.SetValue(null, cmd);
-    }
-
-    [SupportedOSPlatform("windows")]
-    private void RemoveIdGamesProtocol()
-    {
-        Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\idgames");
     }
 
     private static bool UpdateConfig(string? currentValue, Action<string?> setValue, string? defaultValue, bool isPath)

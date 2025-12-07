@@ -2,11 +2,11 @@
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net9.0</TargetFramework>
+        <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <InvariantGlobalization>true</InvariantGlobalization>
-        <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+        <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
         
         <SelfContained>true</SelfContained>
         <PublishTrimmed>true</PublishTrimmed>
@@ -16,9 +16,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="Sharprompt" Version="2.4.5" />
-      <PackageReference Include="Spectre.Console.Cli" Version="0.49.1" />
-      <PackageReference Include="System.Text.Json" Version="8.0.5" />
+      <PackageReference Include="Sharprompt" Version="3.0.1" />
+      <PackageReference Include="Spectre.Console.Cli" Version="0.53.1" />
       <PackageReference Include="WindowsShortcutFactory" Version="1.2.0" />
     </ItemGroup>
 
